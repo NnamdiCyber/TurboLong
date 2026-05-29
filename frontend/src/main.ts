@@ -1407,6 +1407,15 @@ function updatePreview() {
   }
 
   if (rs) {
+    // Current pool APY (zero delta = pre-loop snapshot)
+    const cur = projectRates(rs, 0, 0);
+    const curNetApr = cur.netSupplyApr * lev - cur.netBorrowCost * (lev - 1);
+    const curNetApy = aprToApy(curNetApr);
+    const poolApyEl = $("prev-pool-apy");
+    poolApyEl.textContent = `${fmt(curNetApy, 2)}% APY on equity`;
+    poolApyEl.className   = `prev-net-apr ${curNetApy > 0 ? "apr-ok" : "apr-bad"}`;
+
+    // Projected APY after deposit (accounts for utilization shift)
     const proj = projectRates(rs, supply - oldSupply, borrow - oldBorrow);
     const netApr = proj.netSupplyApr * lev - proj.netBorrowCost * (lev - 1);
     const netApy = aprToApy(netApr);
@@ -1414,7 +1423,7 @@ function updatePreview() {
     $("prev-net-apr").className   = `prev-net-apr ${netApy > 0 ? "apr-great" : "apr-bad"}`;
     const prevTip = $("prev-net-tip");
     if (prevTip) prevTip.setAttribute("data-tip",
-      `Approximate APY — Blend interest does not auto-compound. Actual net APR: ${fmt(netApr, 2)}%`);
+      `Projected APY after your deposit — accounts for how your supply/borrow shifts pool utilization and rates. Current pool APY: ${fmt(curNetApy, 2)}%. Actual projected net APR: ${fmt(netApr, 2)}%`);
 
     // Days until liquidation at this leverage (interest-only, no BLND)
     const spreadPct = proj.interestBorrowApr - proj.interestSupplyApr;
