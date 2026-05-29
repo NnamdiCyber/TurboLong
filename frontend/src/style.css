@@ -1101,10 +1101,18 @@ main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 20px 24
 .vault-tab.active { background: var(--tab-active-bg); color: var(--primary); border-color: var(--tab-active-border); }
 
 .vault-rebalance-row {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
   margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);
 }
 .vault-rebalance-hint { font-size: 12px; }
+.fee-hint {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.position-actions + .fee-hint { margin-top: 8px; }
+.vault-rebalance-row .fee-hint { margin-top: 0; }
 
 .vault-hf-bar-wrap { margin: 12px 0 20px; }
 .hf-bar {

@@ -12,6 +12,7 @@ import { Networks }          from "@creit-tech/stellar-wallets-kit/types";
 import { estimateSwap }      from "@stellar-broker/client";
 import {
   Asset,
+  BASE_FEE,
   Horizon,
   Operation,
   TransactionBuilder,
@@ -334,6 +335,29 @@ const $ = (id: string) => document.getElementById(id)!;
 const fmt  = (n: number, d = 2) =>
   n.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d });
 const aprToApy = (apr: number) => (Math.exp(apr / 100) - 1) * 100;
+const STROOPS_PER_XLM = 10_000_000n;
+const BLEND_SUBMIT_FEE_STROOPS = BigInt(BASE_FEE) * 10n;
+const VAULT_REBALANCE_FEE_STROOPS = 10_000_000n;
+
+function formatFeeXlm(stroops: bigint): string {
+  const whole = stroops / STROOPS_PER_XLM;
+  const fraction = (stroops % STROOPS_PER_XLM).toString().padStart(7, "0");
+  return `${whole}.${fraction} XLM`;
+}
+
+function setActionFeeEstimate(id: string, feePerTx: bigint, txCount: number, label = "Est. network fee") {
+  const el = $(id);
+  const total = feePerTx * BigInt(txCount);
+  el.textContent = `${label}: ${formatFeeXlm(total)} (${txCount} ${txCount === 1 ? "tx" : "txs"})`;
+}
+
+function refreshFeeEstimates() {
+  setActionFeeEstimate("open-fee-estimate", BLEND_SUBMIT_FEE_STROOPS, 2);
+  setActionFeeEstimate("close-fee-estimate", BLEND_SUBMIT_FEE_STROOPS, 1);
+  setActionFeeEstimate("vault-rebalance-fee-estimate", VAULT_REBALANCE_FEE_STROOPS, 1, "Max network fee");
+  $("open-fee-estimate").classList.toggle("hidden", actionMode !== "open");
+  $("close-fee-estimate").classList.toggle("hidden", !positions.byAsset.has(selectedAsset.id));
+}
 const fmtAddr = (addr: string) => addr.slice(0, 6) + "…" + addr.slice(-4);
 
 // ── Skeleton loading (#3) ────────────────────────────────────────────────────
@@ -1304,6 +1328,8 @@ function updatePreview() {
       ? `Add ${fmt(addAmt, 2)} ${selectedAsset.symbol} at ${lev.toFixed(1)}\u00D7`
       : "Add Funds";
   }
+
+  refreshFeeEstimates();
 }
 
 // ── Load data ─────────────────────────────────────────────────────────────────
