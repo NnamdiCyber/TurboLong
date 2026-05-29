@@ -24,12 +24,15 @@ npm install
 
    `VAPID_PUBLIC_KEY` is set in `wrangler.toml` and must match the key pair used for `VAPID_PRIVATE_KEY`.
 
-3. **Deploy**
+3. **Deploy** (after `npx wrangler login`):
 
    ```bash
-   npm run build
-   npm run deploy
+   npm run setup:remote
    ```
+
+   This creates D1 (if needed), runs the remote migration, uploads `VAPID_PRIVATE_KEY` from `.dev.vars`, prompts for `RESEND_API_KEY`, and deploys.
+
+   Or step by step: `npm run build` then `npm run deploy`.
 
 ## Web push (E5)
 
