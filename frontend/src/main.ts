@@ -44,6 +44,10 @@ import {
   submitClassicXdr,
   hfForLeverage,
   maxLeverageFor,
+  getBlndPriceAssumption,
+  getDefaultBlndPrice,
+  setBlndPriceAssumption,
+  withBlndPriceAssumption,
   type NetworkMode,
   type AssetInfo,
   type PoolDef,
@@ -659,6 +663,32 @@ function selectAsset(asset: AssetInfo) {
   if (userAddress) refreshTabData();
 }
 
+function refreshBlndPriceControl() {
+  const input = $("blnd-price-input") as HTMLInputElement;
+  const status = $("blnd-price-status");
+  const override = getBlndPriceAssumption();
+  const fallback = getDefaultBlndPrice();
+  const active = override ?? fallback ?? 0;
+
+  if (document.activeElement !== input) {
+    input.value = active > 0 ? active.toFixed(4) : "";
+  }
+
+  if (override !== null) {
+    status.textContent = `Using custom BLND price: $${fmt(override, 4)}`;
+  } else if (fallback !== null && fallback > 0) {
+    status.textContent = `Using market BLND price: $${fmt(fallback, 4)}`;
+  } else {
+    status.textContent = "Market BLND price unavailable";
+  }
+}
+
+function applyBlndPriceAssumption(price: number | null) {
+  const active = setBlndPriceAssumption(price) ?? getDefaultBlndPrice() ?? 0;
+  reserves = reserves.map(rs => withBlndPriceAssumption(rs, active));
+  renderSelectedAsset();
+}
+
 /** Fetch only balance for the current asset (BLND is pool-wide, fetched in loadAll). */
 async function refreshTabData() {
   if (!userAddress) return;
@@ -779,6 +809,7 @@ function renderSelectedAsset() {
   utilBar.style.background = util > 0.90 ? "var(--danger)" : util > 0.75 ? "var(--warning)" : "var(--success)";
 
   $("stat-price").textContent      = rs.priceUsd > 0 ? `$${fmt(rs.priceUsd, 4)}` : "\u2014";
+  refreshBlndPriceControl();
 
   renderAprLine("supply-interest-apr", rs.interestSupplyApr, false);
   renderAprLine("supply-blnd-apr",     rs.blndSupplyApr,     false, true);
@@ -2022,6 +2053,26 @@ function toggleTheme() {
 }
 $("theme-toggle").addEventListener("click", toggleTheme);
 document.getElementById("mobile-theme-toggle")?.addEventListener("click", toggleTheme);
+
+$("blnd-price-input").addEventListener("input", () => {
+  const input = $("blnd-price-input") as HTMLInputElement;
+  const raw = input.value.trim();
+  if (raw === "") {
+    applyBlndPriceAssumption(null);
+    return;
+  }
+  const price = Number(raw);
+  if (Number.isFinite(price) && price > 0) {
+    applyBlndPriceAssumption(price);
+  } else {
+    $("blnd-price-status").textContent = "Enter a positive USD price";
+  }
+});
+
+$("blnd-price-reset").addEventListener("click", () => {
+  applyBlndPriceAssumption(null);
+  refreshBlndPriceControl();
+});
 
 // Settings dropdown toggle
 $("settings-btn").addEventListener("click", (e) => {

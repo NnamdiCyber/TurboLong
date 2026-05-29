@@ -255,6 +255,7 @@ export function setNetwork(net: NetworkMode) {
   horizon = new Horizon.Server(_cfg.horizonUrl);
   // Reset BLND price cache
   _blndPriceCache = null;
+  _blndPriceOverride = null;
 }
 
 /** Exported getters for active config — used by main.ts and other modules */
@@ -367,12 +368,31 @@ async function simulate(op: xdr.Operation): Promise<any> {
 // ── BLND price from CoinGecko ─────────────────────────────────────────────────
 
 let _blndPriceCache: number | null = null;
+let _blndPriceOverride: number | null = null;
+
+function activeBlndPrice(): number {
+  return _blndPriceOverride ?? _blndPriceCache ?? 0;
+}
+
+export function getBlndPriceAssumption(): number | null {
+  return _blndPriceOverride;
+}
+
+export function getDefaultBlndPrice(): number | null {
+  return _blndPriceCache;
+}
+
+export function setBlndPriceAssumption(price: number | null): number | null {
+  _blndPriceOverride = price !== null && Number.isFinite(price) && price > 0 ? price : null;
+  return _blndPriceOverride;
+}
 
 /**
  * Fetch BLND price. Goes straight to CoinGecko since no pool oracle lists BLND.
  * The pool parameter is accepted for API consistency but currently unused.
  */
 export async function fetchBlndPrice(pool: PoolDef, userAddress: string): Promise<number> {
+  if (_blndPriceOverride !== null) return _blndPriceOverride;
   if (_blndPriceCache !== null) return _blndPriceCache;
 
   // CoinGecko free API
@@ -392,6 +412,23 @@ export async function fetchBlndPrice(pool: PoolDef, userAddress: string): Promis
   _blndPriceCache = 0;
   console.warn("[blend] BLND price unavailable — emissions APR will show 0");
   return 0;
+}
+
+export function withBlndPriceAssumption(rs: ReserveStats, blndPrice = activeBlndPrice()): ReserveStats {
+  const supplyBlndYr = Number(rs.supplyEps) * SECONDS_PER_YEAR / SCALAR_F / SCALAR_F;
+  const borrowBlndYr = Number(rs.borrowEps) * SECONDS_PER_YEAR / SCALAR_F / SCALAR_F;
+  const totalSupplyUsd = rs.totalSupply * rs.priceUsd;
+  const totalBorrowUsd = rs.totalBorrow * rs.priceUsd;
+  const blndSupplyApr = totalSupplyUsd > 0 ? (supplyBlndYr * blndPrice / totalSupplyUsd) * 100 : 0;
+  const blndBorrowApr = totalBorrowUsd > 0 ? (borrowBlndYr * blndPrice / totalBorrowUsd) * 100 : 0;
+
+  return {
+    ...rs,
+    blndSupplyApr,
+    blndBorrowApr,
+    netSupplyApr: rs.interestSupplyApr + blndSupplyApr,
+    netBorrowCost: rs.interestBorrowApr - blndBorrowApr,
+  };
 }
 
 // ── Per-asset pool data ───────────────────────────────────────────────────────
@@ -617,7 +654,7 @@ export function projectRates(rs: ReserveStats, addSupply: number, addBorrow: num
   const projSupplyUsd = projSupply * rs.priceUsd;
   const projBorrowUsd = projBorrow * rs.priceUsd;
 
-  const bp = _blndPriceCache ?? 0;
+  const bp = activeBlndPrice();
   const blndSupplyApr = projSupplyUsd > 0 ? (supplyBlndYr * bp / projSupplyUsd) * 100 : 0;
   const blndBorrowApr = projBorrowUsd > 0 ? (borrowBlndYr * bp / projBorrowUsd) * 100 : 0;
 

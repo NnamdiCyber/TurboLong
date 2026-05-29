@@ -404,6 +404,23 @@ main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 20px 24
 
 /* ── APR grid ────────────────────────────────────────────────────────────── */
 
+.blnd-price-assumption {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 12px;
+  margin-bottom: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface);
+}
+.blnd-price-assumption label {
+  font-size: 11px; color: var(--text-3); text-transform: uppercase;
+  letter-spacing: .5px; font-weight: 600;
+}
+.blnd-price-control { display: flex; align-items: center; gap: 6px; }
+.blnd-price-prefix { color: var(--text-3); font-family: var(--mono); font-size: 13px; }
+.blnd-price-control .input { width: 110px; height: 32px; padding: 0 8px; }
+.blnd-price-status {
+  grid-column: 1 / -1; font-size: 12px; color: var(--text-3);
+}
+
 .apr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
 .apr-card {
   background: var(--surface); border: 1px solid var(--border);
@@ -1184,6 +1201,8 @@ main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 20px 24
 
 @media (max-width: 480px) {
   .stats-row { grid-template-columns: 1fr; }
+  .blnd-price-assumption { grid-template-columns: 1fr; }
+  .blnd-price-control .input { width: 100%; }
   .position-grid { grid-template-columns: 1fr; }
   .vault-pos-grid { grid-template-columns: 1fr; }
   .card { padding: 14px; }
