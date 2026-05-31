@@ -307,6 +307,16 @@
                 </div>
               </div>
 
+              <div class="blnd-price-assumption">
+                <label for="blnd-price-input">BLND price assumption</label>
+                <div class="blnd-price-control">
+                  <span class="blnd-price-prefix">$</span>
+                  <input type="number" id="blnd-price-input" class="input mono" min="0" step="0.0001" placeholder="Market" />
+                  <button id="blnd-price-reset" class="btn btn-ghost btn-sm" type="button">Reset</button>
+                </div>
+                <span class="blnd-price-status" id="blnd-price-status">Using market price</span>
+              </div>
+
               <!-- APR breakdown -->
               <div class="apr-grid">
                 <div class="apr-card">
