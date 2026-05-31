@@ -436,6 +436,7 @@
               <button id="open-btn" class="btn btn-primary btn-lg">Open Position</button>
               <button id="adjust-btn" class="btn btn-primary btn-lg hidden">Adjust Leverage</button>
               <button id="add-funds-btn" class="btn btn-primary btn-lg hidden">Add Funds</button>
+              <p class="fee-hint mono" id="open-fee-estimate" aria-live="polite">Est. network fee: --</p>
               <p class="disclaimer" id="open-disclaimer">Two transactions: (1) token approve, (2) <code>submit_with_allowance</code>.</p>
               <p class="disclaimer hidden" id="adjust-disclaimer">Adjusts leverage by borrowing more (increase) or withdrawing &amp; repaying (decrease).</p>
               <p class="disclaimer hidden" id="add-funds-disclaimer">Deposits additional funds into your existing position at the selected leverage.</p>
@@ -531,6 +532,7 @@
                   <button id="repay-btn" class="btn btn-secondary" disabled>Repay Debt</button>
                   <button id="close-btn" class="btn btn-danger" disabled>Close Position</button>
                 </div>
+                <p class="fee-hint mono hidden" id="close-fee-estimate" aria-live="polite">Est. network fee: --</p>
 
                 <details class="tx-history" id="tx-history" style="display:none">
                   <summary class="tx-history-toggle">Recent Transactions</summary>
@@ -683,6 +685,7 @@
               <div class="vault-rebalance-row">
                 <button id="vault-rebalance-btn" class="btn btn-ghost" disabled>Rebalance</button>
                 <span class="vault-rebalance-hint" id="vault-rebalance-hint">HF is healthy</span>
+                <span class="fee-hint mono" id="vault-rebalance-fee-estimate" aria-live="polite">Max network fee: --</span>
               </div>
             </div>
 
