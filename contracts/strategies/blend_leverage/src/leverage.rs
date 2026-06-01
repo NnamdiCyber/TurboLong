@@ -247,59 +247,79 @@ pub fn check_deposit_safety(
     Ok(())
 }
 
-/// Compute how many loops to unwind to bring HF back above min_hf.
-/// Returns the number of (withdraw, repay) pairs needed.
-pub fn compute_unwind_loops(
+/// Compute the minimal (repay_underlying, withdraw_underlying) to restore HF to target_hf.
+///
+/// Derivation (same-asset loop: withdraw and repay the same underlying amount `x`):
+///   supply_value  = b_tokens × b_rate / SCALAR_12
+///   debt_value    = d_tokens × d_rate / SCALAR_12
+///   HF_after      = (supply_value - x) × c_factor / (debt_value - x)  ≥  target_hf
+///
+/// Solving for x:
+///   x × (target_hf - c_factor) ≥ target_hf × debt_value - supply_value × c_factor
+///   x ≥ numerator / (target_hf - c_factor)   [when target_hf > c_factor]
+///
+/// Returns (repay_underlying, withdraw_underlying).
+/// Both values are equal (withdraw exactly what you repay to keep equity intact).
+/// Returns (0, 0) if HF is already ≥ target_hf or there is no debt.
+pub fn compute_partial_unwind(
     b_tokens: i128,
     d_tokens: i128,
     b_rate: i128,
     d_rate: i128,
     c_factor: i128,
-    min_hf: i128,
-) -> Result<u32, StrategyError> {
-    let mut current_b = b_tokens;
-    let mut current_d = d_tokens;
-    let mut loops = 0u32;
-
-    loop {
-        let hf = compute_health_factor(current_b, current_d, b_rate, d_rate, c_factor)?;
-        if hf >= min_hf || current_d == 0 {
-            break;
-        }
-
-        // Unwind one loop: withdraw enough collateral to repay one "layer" of debt.
-        // The last borrow layer ≈ d_tokens × (c_factor/SCALAR_7)^n pattern.
-        // Simplified: repay an amount equal to current_d × (1 - c_factor/SCALAR_7)
-        // which is approximately the smallest borrow layer.
-        let repay_amount = current_d
-            .checked_mul(SCALAR_7 - c_factor)
-            .ok_or(StrategyError::ArithmeticError)?
-            / SCALAR_7;
-
-        if repay_amount == 0 {
-            break;
-        }
-
-        // The d_tokens burned = repay_underlying / d_rate * SCALAR_12
-        let d_tokens_burned = repay_amount
-            .fixed_mul_floor(SCALAR_12, d_rate)
-            .ok_or(StrategyError::ArithmeticError)?;
-
-        // The b_tokens withdrawn = withdraw_underlying / b_rate * SCALAR_12
-        // We withdraw same amount as we repay (netting)
-        let b_tokens_withdrawn = repay_amount
-            .fixed_mul_floor(SCALAR_12, b_rate)
-            .ok_or(StrategyError::ArithmeticError)?;
-
-        current_d = current_d.checked_sub(d_tokens_burned).unwrap_or(0);
-        current_b = current_b.checked_sub(b_tokens_withdrawn).unwrap_or(0);
-        loops += 1;
-
-        if loops >= 5 {
-            // Safety limit on unwind iterations
-            break;
-        }
+    target_hf: i128,
+) -> Result<(i128, i128), StrategyError> {
+    if d_tokens == 0 {
+        return Ok((0, 0));
     }
 
-    Ok(loops)
+    let hf = compute_health_factor(b_tokens, d_tokens, b_rate, d_rate, c_factor)?;
+    if hf >= target_hf {
+        return Ok((0, 0));
+    }
+
+    // supply_value and debt_value in underlying units (SCALAR_12 cancels)
+    let supply_value = b_tokens
+        .fixed_mul_floor(b_rate, SCALAR_12)
+        .ok_or(StrategyError::ArithmeticError)?;
+    let debt_value = d_tokens
+        .fixed_mul_floor(d_rate, SCALAR_12)
+        .ok_or(StrategyError::ArithmeticError)?;
+
+    // numerator = target_hf × debt_value - supply_value × c_factor  (all in 1e7 scale)
+    let target_debt = target_hf
+        .checked_mul(debt_value)
+        .ok_or(StrategyError::ArithmeticError)?;
+    let weighted_supply = supply_value
+        .checked_mul(c_factor)
+        .ok_or(StrategyError::ArithmeticError)?;
+
+    if target_debt <= weighted_supply {
+        return Ok((0, 0));
+    }
+
+    let numerator = target_debt
+        .checked_sub(weighted_supply)
+        .ok_or(StrategyError::UnderflowOverflow)?;
+
+    // denominator = target_hf - c_factor  (both 1e7 scaled)
+    let denominator = target_hf
+        .checked_sub(c_factor)
+        .ok_or(StrategyError::UnderflowOverflow)?;
+
+    if denominator <= 0 {
+        // target_hf ≤ c_factor: impossible to reach by partial unwind; repay all debt.
+        return Ok((debt_value, supply_value));
+    }
+
+    // x = ceil(numerator / denominator) — round up to guarantee HF ≥ target after integer math
+    let x = numerator
+        .checked_add(denominator - 1)
+        .ok_or(StrategyError::ArithmeticError)?
+        .checked_div(denominator)
+        .ok_or(StrategyError::DivisionByZero)?;
+
+    // Cap at total debt value (can't repay more than owed)
+    let repay = x.min(debt_value);
+    Ok((repay, repay))
 }

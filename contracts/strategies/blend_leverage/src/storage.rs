@@ -46,6 +46,12 @@ pub struct Config {
     pub target_loops: u32,
     /// Minimum health factor (1e7 scaled, e.g. 1_050_000 = 1.05)
     pub min_hf: i128,
+    /// Orange-zone trigger: if HF drops below this, partial unwind fires.
+    /// Must be > min_hf. (1e7 scaled, e.g. 1_150_000 = 1.15)
+    pub orange_hf: i128,
+    /// Target health factor to restore to after partial unwind (1e7 scaled).
+    /// Must be >= orange_hf.
+    pub target_hf: i128,
 }
 
 pub fn set_config(e: &Env, config: Config) {

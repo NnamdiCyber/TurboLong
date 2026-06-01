@@ -4,8 +4,8 @@
 
 use crate::constants::{FIRST_DEPOSIT_LOCKUP, SCALAR_12, SCALAR_7};
 use crate::leverage::{
-    compute_equity, compute_health_factor, compute_loop_pairs, compute_totals, compute_unwind_loops,
-    shares_to_underlying, underlying_to_shares,
+    compute_equity, compute_health_factor, compute_loop_pairs, compute_partial_unwind,
+    compute_totals, shares_to_underlying, underlying_to_shares,
 };
 use crate::storage::LeverageReserves;
 
@@ -312,50 +312,120 @@ fn test_hf_below_one() {
     assert!(hf < SCALAR_7); // HF < 1.0 → liquidatable
 }
 
-// ── compute_unwind_loops ─────────────────────────────────────────────────────
+// ── compute_partial_unwind ───────────────────────────────────────────────────
 
+/// Already at target HF — should return (0, 0).
 #[test]
-fn test_unwind_healthy_position_returns_zero() {
-    // HF = 1.9 >> 1.05 → no unwinding needed
-    let loops = compute_unwind_loops(
+fn test_partial_unwind_already_at_target() {
+    // HF = 1.9 >> target 1.15 → no unwind needed
+    let (repay, withdraw) = compute_partial_unwind(
         2_000_0000000,
         1_000_0000000,
         SCALAR_12,
         SCALAR_12,
         9_500_000,
-        10_500_000, // min_hf = 1.05
+        11_500_000, // target_hf = 1.15
     ).unwrap();
-    assert_eq!(loops, 0);
+    assert_eq!(repay, 0);
+    assert_eq!(withdraw, 0);
 }
 
+/// No debt — should return (0, 0).
 #[test]
-fn test_unwind_unhealthy_position() {
-    // HF just below 1.05 → should need some unwinding
-    // b=10500, d=9500, c=0.95 → HF = 10500*0.95/9500 ≈ 1.05 exactly
-    // Make it slightly below: b=10499, d=9500
-    let loops = compute_unwind_loops(
-        10_499_0000000,
-        9_500_0000000,
-        SCALAR_12,
-        SCALAR_12,
-        9_500_000,
-        10_500_000,
-    ).unwrap();
-    assert!(loops > 0, "Should need at least 1 unwind loop");
-    assert!(loops <= 5, "Should not exceed safety limit");
-}
-
-#[test]
-fn test_unwind_no_debt() {
-    let loops = compute_unwind_loops(
+fn test_partial_unwind_no_debt() {
+    let (repay, withdraw) = compute_partial_unwind(
         1_000_0000000,
         0,
         SCALAR_12,
         SCALAR_12,
         9_500_000,
-        10_500_000,
+        11_500_000,
     ).unwrap();
-    assert_eq!(loops, 0);
+    assert_eq!(repay, 0);
+    assert_eq!(withdraw, 0);
+}
+
+/// Single-loop position (2x leverage): HF just below target, minimal repay.
+#[test]
+fn test_partial_unwind_single_loop() {
+    // 2x leverage: b=2000, d=1000, c=0.95 → HF = 2000*0.95/1000 = 1.9
+    // Drop HF to just below 1.15 by increasing debt: b=2000, d=1650
+    // HF = 2000*0.95/1650 ≈ 1.1515 — just above 1.15, so no unwind needed.
+    // Use b=2000, d=1700 → HF = 2000*0.95/1700 ≈ 1.1176 < 1.15 → needs unwind.
+    //
+    // Solve: (2000 - x)*0.95 / (1700 - x) = 1.15
+    // 1900 - 0.95x = 1955 - 1.15x  →  0.2x = 55  →  x = 275
+    let (repay, withdraw) = compute_partial_unwind(
+        2_000_0000000,
+        1_700_0000000,
+        SCALAR_12,
+        SCALAR_12,
+        9_500_000,
+        11_500_000, // target_hf = 1.15
+    ).unwrap();
+    assert!(repay > 0, "Should need some repayment");
+    assert_eq!(repay, withdraw, "repay and withdraw must be equal");
+
+    // Verify the resulting HF is >= target
+    let new_supply = 2_000_0000000 - withdraw;
+    let new_debt = 1_700_0000000 - repay;
+    let hf_after = compute_health_factor(new_supply, new_debt, SCALAR_12, SCALAR_12, 9_500_000).unwrap();
+    assert!(hf_after >= 11_500_000, "HF after unwind should be >= target: got {}", hf_after);
+
+    // Verify it's minimal: one stroop less repayment would leave HF below target
+    if repay > 1 {
+        let hf_less = compute_health_factor(
+            2_000_0000000 - (withdraw - 1),
+            1_700_0000000 - (repay - 1),
+            SCALAR_12, SCALAR_12, 9_500_000,
+        ).unwrap();
+        assert!(hf_less < 11_500_000, "One stroop less should be below target: got {}", hf_less);
+    }
+}
+
+/// Max-loops position (near-max leverage): large repay needed.
+#[test]
+fn test_partial_unwind_max_loops() {
+    // 13-loop position: b≈8300, d≈7300, c=0.95
+    // HF = 8300*0.95/7300 ≈ 1.0795 — below orange_hf=1.15, target=1.20
+    let b = 8_300_0000000_i128;
+    let d = 7_300_0000000_i128;
+    let c = 9_500_000_i128;
+    let target = 12_000_000_i128; // 1.20
+
+    let (repay, withdraw) = compute_partial_unwind(b, d, SCALAR_12, SCALAR_12, c, target).unwrap();
+    assert!(repay > 0);
+    assert_eq!(repay, withdraw);
+
+    // Verify HF after
+    let hf_after = compute_health_factor(b - withdraw, d - repay, SCALAR_12, SCALAR_12, c).unwrap();
+    assert!(hf_after >= target, "HF after max-loop unwind should be >= target: got {}", hf_after);
+
+    // Repay should be less than total debt (partial, not full close)
+    assert!(repay < d, "Partial unwind should not repay all debt");
+}
+
+/// Unhealthy position (HF just below target): verify positive repay and HF restoration.
+#[test]
+fn test_partial_unwind_unhealthy_position() {
+    // b=10499, d=9500, c=0.95 → HF = 10499*0.95/9500 ≈ 1.04989 < 1.05
+    let (repay, withdraw) = compute_partial_unwind(
+        10_499_0000000,
+        9_500_0000000,
+        SCALAR_12,
+        SCALAR_12,
+        9_500_000,
+        10_500_000, // target_hf = 1.05
+    ).unwrap();
+    assert!(repay > 0);
+    assert_eq!(repay, withdraw);
+
+    let hf_after = compute_health_factor(
+        10_499_0000000 - withdraw,
+        9_500_0000000 - repay,
+        SCALAR_12, SCALAR_12, 9_500_000,
+    ).unwrap();
+    assert!(hf_after >= 10_500_000, "HF should be restored to target: got {}", hf_after);
 }
 
 // ── Leverage table validation (cross-reference with simulate.rs) ─────────────
@@ -642,6 +712,8 @@ fn test_safety_rejects_high_utilization() {
         c_factor: 9_500_000,
         target_loops: 8,
         min_hf: 10_500_000,
+        orange_hf: 11_500_000,
+        target_hf: 12_000_000,
     };
 
     // Pool at 96% utilization → should panic (above 95% limit)
@@ -677,6 +749,8 @@ fn test_safety_allows_healthy_pool() {
         c_factor: 9_500_000,
         target_loops: 8,
         min_hf: 10_500_000,
+        orange_hf: 11_500_000,
+        target_hf: 12_000_000,
     };
 
     // Pool at 50% utilization, healthy HF

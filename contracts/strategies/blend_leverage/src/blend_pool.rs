@@ -295,6 +295,79 @@ pub fn submit_unwind(
     Ok((b_removed, d_removed))
 }
 
+/// Partial unwind: repay and withdraw exact underlying amounts in a single atomic submit.
+///
+/// Used by the orange-zone rebalance path. Both `repay_amount` and `withdraw_amount`
+/// are in underlying units. The pool atomically withdraws collateral then repays debt,
+/// leaving equity unchanged.
+///
+/// Returns (b_tokens_removed, d_tokens_removed).
+pub fn submit_partial_unwind(
+    e: &Env,
+    repay_amount: i128,
+    withdraw_amount: i128,
+    config: &Config,
+) -> Result<(i128, i128), StrategyError> {
+    if repay_amount == 0 && withdraw_amount == 0 {
+        return Ok((0, 0));
+    }
+
+    let pool_client = BlendPoolClient::new(e, &config.pool);
+    let strategy = e.current_contract_address();
+
+    let pre_positions = pool_client.get_positions(&strategy);
+    let pre_b = pre_positions.collateral.get(config.reserve_id).unwrap_or(0);
+    let pre_d = pre_positions.liabilities.get(config.reserve_id).unwrap_or(0);
+
+    let mut requests: Vec<Request> = Vec::new(e);
+
+    if withdraw_amount > 0 {
+        requests.push_back(Request {
+            address: config.asset.clone(),
+            amount: withdraw_amount,
+            request_type: REQUEST_TYPE_WITHDRAW_COLLATERAL,
+        });
+    }
+    if repay_amount > 0 {
+        requests.push_back(Request {
+            address: config.asset.clone(),
+            amount: repay_amount,
+            request_type: REQUEST_TYPE_REPAY,
+        });
+
+        let token_client = TokenClient::new(e, &config.asset);
+        e.authorize_as_current_contract(vec![
+            e,
+            InvokerContractAuthEntry::Contract(SubContractInvocation {
+                context: ContractContext {
+                    contract: config.asset.clone(),
+                    fn_name: Symbol::new(e, "approve"),
+                    args: (
+                        strategy.clone(),
+                        config.pool.clone(),
+                        repay_amount,
+                        e.ledger().sequence() + 1u32,
+                    )
+                        .into_val(e),
+                },
+                sub_invocations: vec![e],
+            }),
+        ]);
+        token_client.approve(&strategy, &config.pool, &repay_amount, &(e.ledger().sequence() + 1));
+    }
+
+    pool_client.submit_with_allowance(&strategy, &strategy, &strategy, &requests);
+
+    let new_positions = pool_client.get_positions(&strategy);
+    let new_b = new_positions.collateral.get(config.reserve_id).unwrap_or(0);
+    let new_d = new_positions.liabilities.get(config.reserve_id).unwrap_or(0);
+
+    Ok((
+        pre_b.checked_sub(new_b).unwrap_or(0),
+        pre_d.checked_sub(new_d).unwrap_or(0),
+    ))
+}
+
 /// Deleverage by unwinding loops to improve health factor.
 /// Builds alternating [withdraw, repay, ...] requests and submits atomically.
 /// Returns (b_tokens_removed, d_tokens_removed).
